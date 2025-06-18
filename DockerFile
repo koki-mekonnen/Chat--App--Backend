@@ -1,17 +1,21 @@
-FROM node:16-alpine
+FROM node:20-alpine AS builder
 
-WORKDIR /usr/src/app
-
+WORKDIR /app
 COPY package*.json ./
-
 RUN npm install
-
 COPY . .
-
 RUN npm run build
 
-ENV NODE_ENV production
+FROM node:20-alpine
 
-EXPOSE 3001
+RUN npm install -g pm2
 
-CMD ["pm2-runtime", "start", "dist/main.js", "-i", "max"]
+COPY --from=builder /app /app
+
+WORKDIR /app
+
+COPY wait-for-it.sh .
+
+RUN npx prisma generate
+
+CMD ["sh", "-c", "./wait-for-it.sh db:5432 -- npx prisma migrate deploy && pm2-runtime start ecosystem.config.js"]
