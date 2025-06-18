@@ -8,7 +8,11 @@ export class WsJwtGuard implements CanActivate {
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
         const client = context.switchToWs().getClient();
-        const token = client.handshake.query.token;
+        // const token = client.handshake.query.token;
+        const token = client.handshake?.auth?.token ||
+            context.switchToWs().getData()?.token ||
+            client.handshake?.headers?.authorization?.split(' ')[1];
+
 
         if (!token) {
             throw new WsException('Missing token');
