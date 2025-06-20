@@ -14,8 +14,8 @@ COPY --from=builder /app /app
 
 WORKDIR /app
 
-COPY wait-for-it.sh .
+# COPY wait-for-it.sh .
 
 RUN npx prisma generate
 
-CMD ["sh", "-c", "./wait-for-it.sh db:5432 -- npx prisma migrate deploy && pm2-runtime start ecosystem.config.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && pm2-runtime start ecosystem.config.js"]

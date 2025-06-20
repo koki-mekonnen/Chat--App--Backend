@@ -15,7 +15,7 @@ import { RedisPropagatorService } from './redis-propagator.service';
 
 @WebSocketGateway({
     cors: {
-        origin: '*',  //process.env.FRONTEND_URL || 
+        origin: '*',
         credentials: true,
     },
 })
@@ -29,9 +29,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         this.redisPropagatorService.injectSocketServer(server);
     }
 
-    // async onModuleInit() {
-    //     await this.redisPropagatorService.connect();
-    // }
+    async onModuleInit() {
+        await this.redisPropagatorService.connect();
+    }
 
     handleConnection(client: Socket) {
         console.log(`Client connected: ${client.id}`);
@@ -47,7 +47,6 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         @MessageBody() payload: { content: string, token?: string },
         @ConnectedSocket() client: Socket,
     ) {
-        // The guard has already validated the token and attached user
         const user = client.data.user;
 
         const message = {
@@ -57,6 +56,6 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
             createdAt: new Date(),
         };
 
-        this.server.emit('receiveMessage', message);
+        await this.redisPropagatorService.propagateMessage('receiveMessage', message);
     }
 }
