@@ -12,6 +12,7 @@ import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from '../auth/ws-jwt.guard';
 import { RedisPropagatorService } from './redis-propagator.service';
+import { AuthService } from '../auth/auth.service';
 
 @WebSocketGateway({
     cors: {
@@ -19,11 +20,14 @@ import { RedisPropagatorService } from './redis-propagator.service';
         credentials: true,
     },
 })
+
 export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
     server: Server;
 
-    constructor(private readonly redisPropagatorService: RedisPropagatorService) { }
+    constructor(private readonly redisPropagatorService: RedisPropagatorService,
+        private readonly authService: AuthService
+    ) { }
 
     afterInit(server: Server) {
         this.redisPropagatorService.injectSocketServer(server);
@@ -33,22 +37,93 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         await this.redisPropagatorService.connect();
     }
 
-    handleConnection(client: Socket) {
-        console.log(`Client connected: ${client.id}`);
+    @UseGuards(WsJwtGuard)
+    async handleConnection(@ConnectedSocket() client: Socket) {
+        const token =
+            client.handshake?.auth?.token ||
+            client.handshake?.query?.token ||
+            (client.handshake?.headers?.authorization?.split(' ')[1]);
+            const user = await this.authService.validateToken(token);
+            client.data.user = user;
+
+        if (!user) {
+            console.error('No user found in connection handler');
+            return; 
+        }
+
+        console.log(`Client connected: ${client.data.user}`);
+
+      
+        await this.redisPropagatorService.updateUserStatus(user.sub, 'online');
+
+        const users = await this.redisPropagatorService.getAllUsers();
+        this.server.emit('userStatusChanged', {
+            userId: user.id,
+            status: 'online',
+            users: Array.from(users.values()),
+        });
+
+        client.join(`user_${user.id}`);
+        console.log(`Client connected: ${client}`);
+
+
+        console.log(`Client connected: ${user.id}`);
     }
 
-    handleDisconnect(client: Socket) {
-        console.log(`Client disconnected: ${client.id}`);
+    @UseGuards(WsJwtGuard)
+    async handleDisconnect(@ConnectedSocket() client: Socket) {
+        const token =
+            client.handshake?.auth?.token ||
+            client.handshake?.query?.token ||
+            (client.handshake?.headers?.authorization?.split(' ')[1]);
+
+        const user = await this.authService.validateToken(token);
+        client.data.user = user;
+
+        if (!user) return;
+
+        await this.redisPropagatorService.updateUserStatus(user.sub, 'offline');
+
+        const users = await this.redisPropagatorService.getAllUsers();
+        this.server.emit('userStatusChanged', {
+            userId: user.sub,
+            status: 'offline',
+            users: Array.from(users.values()),
+        });
+
+        client.leave(`user_${user.sub}`);
+
+        console.log(`Client disconnected: ${user.sub}`);
+    }
+
+    @UseGuards(WsJwtGuard)
+    @SubscribeMessage('getallusers')
+    async handleGetAllUsers(
+        @MessageBody() _: any,
+        @ConnectedSocket() client: Socket,
+    ) {
+        const users = await this.redisPropagatorService.getAllUsers();
+        console.log(users); 
+        client.emit('getallusers', Array.isArray(users) ? users : []);
+    }
+
+    @UseGuards(WsJwtGuard)
+    @SubscribeMessage('getuser')
+    async handleGetUser(
+        @MessageBody() userId: number,
+        @ConnectedSocket() client: Socket,
+    ) {
+        const user = await this.redisPropagatorService.getUser(userId);
+        client.emit('getuser', user || null);
     }
 
     @UseGuards(WsJwtGuard)
     @SubscribeMessage('sendMessage')
     async handleMessage(
-        @MessageBody() payload: { content: string, token?: string },
+        @MessageBody() payload: { content: string },
         @ConnectedSocket() client: Socket,
     ) {
         const user = client.data.user;
-
         const message = {
             content: payload.content,
             userId: user.id,
