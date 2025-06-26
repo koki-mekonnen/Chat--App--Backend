@@ -43,17 +43,18 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
             client.handshake?.auth?.token ||
             client.handshake?.query?.token ||
             (client.handshake?.headers?.authorization?.split(' ')[1]);
-            const user = await this.authService.validateToken(token);
-            client.data.user = user;
+        const user = await this.authService.validateToken(token);
+
+        client.data.user = user;
 
         if (!user) {
             console.error('No user found in connection handler');
-            return; 
+            return;
         }
 
-        console.log(`Client connected: ${client.data.user}`);
+        // console.log(`Client connected : ${client.data.user}`);
 
-      
+
         await this.redisPropagatorService.updateUserStatus(user.sub, 'online');
 
         const users = await this.redisPropagatorService.getAllUsers();
@@ -64,10 +65,10 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         });
 
         client.join(`user_${user.id}`);
-        console.log(`Client connected: ${client}`);
+        // console.log(`Client connected: ${client}`);
 
 
-        console.log(`Client connected: ${user.id}`);
+        console.log(`Client connected: ${user.sub}`);
     }
 
     @UseGuards(WsJwtGuard)
@@ -103,7 +104,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         @ConnectedSocket() client: Socket,
     ) {
         const users = await this.redisPropagatorService.getAllUsers();
-        console.log(users); 
+        // console.log(users);
         client.emit('getallusers', Array.isArray(users) ? users : []);
     }
 
@@ -129,8 +130,35 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
             userId: user.id,
             username: user.username,
             createdAt: new Date(),
+
+
+
         };
 
         await this.redisPropagatorService.propagateMessage('receiveMessage', message);
+    }
+
+
+    @UseGuards(WsJwtGuard)
+    @SubscribeMessage('sendprivateMessage')
+    async handlePrivateMessage(
+        @MessageBody() payload: { reciverId: number, content: string },
+        @ConnectedSocket() client: Socket,
+    ) {
+        const user = client.data.user;
+        const message = {
+            content: payload.content,
+            reciverId: payload.reciverId,
+            senderId: user.sub,
+            username: user.username,
+            createdAt: new Date().toISOString(),
+        };
+
+        console.log('Sending message:', message);
+
+
+        await this.redisPropagatorService.propagateMessage('receiveMessage', message);
+
+        return { status: 'success', message: 'Message sent successfully' };
     }
 }
